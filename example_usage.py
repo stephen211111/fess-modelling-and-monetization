@@ -34,19 +34,18 @@ def scenario_single_unit():
     print("="*60)
 
     params = FESSParams(
-        rated_power_kw          = 250.0,
-        rated_energy_kwh        = 16.67,
-        standby_loss_frac_per_hour = 0.02,
-        min_speed_ratio         = 0.20,
+        rated_power_kw   = 292.0,
+        rated_energy_kwh = 1169.0,
+        min_speed_ratio  = 0.20,
     )
     unit = FESSUnit(params, unit_id="FW-01", initial_soc_frac=0.5)
 
     dt = 1 / 60  # 1-minute steps
 
     # Charge at full power for 4 minutes
-    print("\nCharging at 250 kW for 4 minutes...")
+    print("\nCharging at 292 kW for 4 minutes...")
     for _ in range(4):
-        snap = unit.step(power_setpoint_kw=250.0, dt_hours=dt)
+        snap = unit.step(power_setpoint_kw=292.0, dt_hours=dt)
 
     print(f"  After charge: SoC={snap.soc_kwh:.2f} kWh "
           f"({snap.soc_frac:.1%}), speed_ratio={snap.speed_ratio:.3f}")
@@ -57,12 +56,12 @@ def scenario_single_unit():
         snap = unit.step(power_setpoint_kw=0.0, dt_hours=dt)
 
     print(f"  After idle:   SoC={snap.soc_kwh:.2f} kWh "
-          f"({snap.soc_frac:.1%}), standby_loss={snap.standby_loss_kw:.2f} kW")
+          f"({snap.soc_frac:.1%}), standby_loss={snap.standby_mechanical_kw + snap.standby_auxiliary_kw:.2f} kW")
 
     # Discharge at full available power for 4 minutes
     print("\nDischarging at max available power for 4 minutes...")
     for _ in range(4):
-        snap = unit.step(power_setpoint_kw=-250.0, dt_hours=dt)
+        snap = unit.step(power_setpoint_kw=-292.0, dt_hours=dt)
 
     print(f"  After discharge: SoC={snap.soc_kwh:.2f} kWh "
           f"({snap.soc_frac:.1%}), P_delivered={abs(snap.power_kw):.1f} kW")
@@ -85,12 +84,9 @@ def scenario_afrr_plant():
 
     # --- Build fleet ---
     params = FESSParams(
-        rated_power_kw             = 250.0,
-        rated_energy_kwh           = 16.67,
-        standby_loss_frac_per_hour = 0.02,
-        min_speed_ratio            = 0.20,
-        eta_motor_gen              = 0.96,
-        eta_power_electronics      = 0.97,
+        rated_power_kw   = 292.0,
+        rated_energy_kwh = 1169.0,
+        min_speed_ratio  = 0.20,
     )
     units = [FESSUnit(params, f"FW-{i:02d}", initial_soc_frac=0.55)
              for i in range(20)]
@@ -161,10 +157,9 @@ def scenario_arbitrage_plant():
     print("="*60)
 
     params = FESSParams(
-        rated_power_kw             = 250.0,
-        rated_energy_kwh           = 16.67,
-        standby_loss_frac_per_hour = 0.02,
-        min_speed_ratio            = 0.20,
+        rated_power_kw   = 292.0,
+        rated_energy_kwh = 1169.0,
+        min_speed_ratio  = 0.20,
     )
     units = [FESSUnit(params, f"FW-{i:02d}", initial_soc_frac=0.6)
              for i in range(20)]
@@ -270,7 +265,7 @@ def plot_results(
     # Speed ratio subplot
     ax1c = fig.add_subplot(gs[0, 1])
     speed_s1 = [s.speed_ratio for s in unit_s1.history]
-    loss_s1  = [s.standby_loss_kw for s in unit_s1.history]
+    loss_s1  = [s.standby_mechanical_kw + s.standby_auxiliary_kw for s in unit_s1.history]
     ax1c.plot(times_s1, speed_s1, color="#9C27B0", linewidth=2, label="Speed ratio")
     ax1c.set_ylabel("Speed ratio (ω/ωmax)", color="#9C27B0")
     ax1c.set_xlabel("Time (min)")
@@ -287,7 +282,7 @@ def plot_results(
     t_s2 = df_s2["time_h"] * 60
     ax2a.plot(t_s2, df_s2["plant_power_kw"] / 1000, color="#2196F3", linewidth=1.5, label="Plant power (MW)")
     agc_times = np.arange(len(agc_signal)) / 60
-    ax2a.plot(agc_times * 60, agc_signal * plant_s2.total_rated_power_kw * 0.4 / 1000,
+    ax2a.plot(agc_times * 60, agc_signal / 1000,
               color="gray", linewidth=1, alpha=0.6, linestyle="--", label="AGC setpoint")
     ax2a.set_ylabel("Power (MW)")
     ax2a.set_xlabel("Time (min)")
