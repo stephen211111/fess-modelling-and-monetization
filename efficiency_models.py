@@ -180,7 +180,7 @@ class MachineEfficiency:
         P_shaft = P_elec * η  →  η = P_pu / (P_pu + L_total)
         """
         if power_pu <= 0:
-            return 1.0
+            return 0.0
         L = self._loss_fraction(power_pu, speed_ratio)
         return float(np.clip(power_pu / (power_pu + L), 0.0, 1.0))
 
@@ -190,7 +190,7 @@ class MachineEfficiency:
         P_elec = P_shaft * η  →  η = (P_pu - L_total) / P_pu
         """
         if power_pu <= 0:
-            return 1.0
+            return 0.0
         L = self._loss_fraction(power_pu, speed_ratio)
         return float(np.clip((power_pu - L) / power_pu, 0.0, 1.0))
 
@@ -430,7 +430,7 @@ class InverterEfficiency:
             Sign is ignored — losses are symmetric.
         """
         if abs(power_pu) < 1e-9:
-            return 1.0
+            return 0.0
         p = abs(power_pu)
         L = self._loss_fraction(p)
         return float(np.clip(p / (p + L), 0.0, 1.0))
