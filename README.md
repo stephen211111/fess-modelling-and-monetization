@@ -1,6 +1,6 @@
-# Flywheel Energy Storage System — Physics Modelling & Market Optimisation
+# FESS Modelling and Monetization
 
-A production-grade Python framework for simulating and optimising **Flywheel Energy Storage Systems (FESS)** at both unit and fleet level. It covers the full stack: high-fidelity physics simulation → LP/MILP day-ahead arbitrage optimisation → revenue stacking across multiple ancillary service markets.
+A production-grade Python framework for **flywheel battery modelling and energy trading**. It covers the full stack: high-fidelity physics simulation → LP/MILP day-ahead arbitrage optimisation → revenue stacking across multiple ancillary service markets.
 
 > Originally developed as part of research at [DTU Electro](https://gitlab.gbar.dtu.dk/project/flywheel_model). Ported and extended here for open portfolio use.
 
@@ -8,7 +8,8 @@ A production-grade Python framework for simulating and optimising **Flywheel Ene
 
 ## Contents
 
-- [Project Overview](#project-overview)
+- [What is a Flywheel Energy Storage System?](#what-is-a-flywheel-energy-storage-system)
+- [Why Model and Monetize FESS?](#why-model-and-monetize-fess)
 - [Architecture](#architecture)
 - [Installation](#installation)
 - [Module Reference](#module-reference)
@@ -17,22 +18,41 @@ A production-grade Python framework for simulating and optimising **Flywheel Ene
   - [Example 2 — Fleet aFRR Regulation](#example-2--fleet-afrr-regulation)
   - [Example 3 — LP Day-Ahead Arbitrage](#example-3--lp-day-ahead-arbitrage)
   - [Example 4 — MILP with 2D Piecewise-Linear Efficiency](#example-4--milp-with-2d-piecewise-linear-efficiency)
-- [Results Gallery](#results-gallery)
+- [Simulation Results](#simulation-results)
 - [Physics Background](#physics-background)
 - [Licence](#licence)
 
 ---
 
-## Project Overview
+## What is a Flywheel Energy Storage System?
 
-Flywheel Energy Storage Systems store energy as rotational kinetic energy in a high-speed rotor. They excel at **high-cycle, short-duration** applications (seconds to minutes) where lithium-ion batteries degrade rapidly. FESS units are characterised by:
+A Flywheel Energy Storage System (FESS) stores energy as **rotational kinetic energy** in a high-speed rotor suspended in a near-vacuum enclosure. When the grid needs power, the rotor drives a motor/generator to discharge. When surplus power is available, the motor accelerates the rotor to charge.
 
-- Cycle-life independent of depth-of-discharge (no degradation)
-- Power-density far exceeding chemical batteries (~10× higher)
-- Speed-dependent available power and efficiency curves
-- Complex standby losses (aerodynamic drag, magnetic bearing currents, cooling, vacuum pump)
+Key physical properties that distinguish FESS from chemical batteries:
 
-This framework models all of the above and then exposes LP and MILP optimisers that can trade the fleet on Nord Pool-style day-ahead markets and ancillary service markets (FCR-N, aFRR, mFRR).
+| Property | FESS | Li-ion |
+|---|---|---|
+| Cycle life | Unlimited (no degradation) | ~3 000–6 000 cycles |
+| Round-trip efficiency | 85–95% | 90–95% |
+| Power density | ~10× higher | Baseline |
+| Energy density | ~10× lower | Baseline |
+| Self-discharge | Moderate (standby losses) | Low |
+| Response time | < 1 ms | ~100 ms |
+| Optimal duration | Seconds to minutes | Minutes to hours |
+
+FESS excels at **high-cycle, short-duration** grid services — frequency regulation (FCR, aFRR), synthetic inertia, and fast arbitrage — where Li-ion would degrade rapidly.
+
+---
+
+## Why Model and Monetize FESS?
+
+Grid-connected FESS units must bid into competitive energy and ancillary service markets. Profitability depends on:
+
+1. **Accurate physics** — efficiency is not constant; it varies with shaft speed (SoC) and power level. Standby losses are speed-dependent and non-trivial.
+2. **Optimal dispatch** — a day-ahead price-taker must solve a constrained energy scheduling problem. Using a flat efficiency constant underestimates round-trip losses and overestimates revenue.
+3. **Revenue stacking** — combining day-ahead arbitrage with FCR/aFRR availability payments significantly improves project economics.
+
+This framework provides all three layers: a physics engine, an LP lineariser, and a MILP solver that captures the 2-D efficiency surface (Power × SoC).
 
 ---
 
@@ -65,12 +85,12 @@ This framework models all of the above and then exposes LP and MILP optimisers t
 ## Installation
 
 ```bash
-git clone https://github.com/<your-username>/flywheel_model.git
-cd flywheel_model
+git clone https://github.com/stephen211111/fess-modelling-and-monetization.git
+cd fess-modelling-and-monetization
 pip install -r requirements.txt
 ```
 
-**Python ≥ 3.9** is required. All solvers run through `scipy` — no external LP/MILP solver is needed.
+**Python ≥ 3.9** is required. All solvers run through `scipy` — no external LP/MILP solver licence is needed.
 
 ```
 numpy>=1.24
@@ -201,65 +221,56 @@ SOC spread (max–min across units):      18.4 pp
 
 ### Example 3 — LP Day-Ahead Arbitrage
 
-Optimise the dispatch of a 20-unit fleet (5 MW / 333 kWh) over a 24-hour day-ahead price profile using a Linear Programme.
-
-The LP maximises revenue subject to energy balance, power availability (linearised as a function of SoC), transformer capacity, and optional SoC return constraint.
+Optimise the dispatch of a 50-unit fleet (14.6 MW / 58.5 MWh) over a 24-hour day-ahead price profile using a Linear Programme. The LP maximises revenue subject to energy balance, power availability (linearised as a function of SoC), transformer capacity, and optional SoC return constraint.
 
 ```python
 import numpy as np
-import matplotlib.pyplot as plt
 from linearized_physics import linearize_fleet
 from fess_unit import FESSParams
-from lp_day_ahead_example import run_lp_arbitrage   # see lp_day_ahead_example.py
+from lp_day_ahead_example import run_lp_arbitrage
 
-# --- Price profile: Danish DK2 stylised day-ahead prices (€/MWh)
+# Danish DK2 stylised day-ahead prices (€/MWh)
 prices = np.array([
-    28, 25, 22, 20, 19, 21, 35, 62, 78, 71, 65, 58,
-    52, 49, 55, 67, 82, 95, 88, 74, 60, 48, 38, 30
-], dtype=float)  # 24 hourly values
+    35, 33, 31, 30, 30, 32, 42, 65, 82, 78, 72, 65,
+    60, 57, 62, 72, 88, 100, 95, 80, 68, 55, 45, 38
+], dtype=float)
 
-# --- Linearise fleet physics to LP constants
-unit_params = FESSParams(rated_power_kw=250.0, rated_energy_kwh=16.67)
-fleet = linearize_fleet(unit_params, n_units=20)
+unit_params = FESSParams(rated_power_kw=292.0, rated_energy_kwh=1169.0)
+fleet = linearize_fleet(unit_params, n_units=50)
 
 print("LP fleet parameters:")
 print(f"  Rated power:       {fleet.rated_power_kw:.0f} kW")
 print(f"  Rated energy:      {fleet.rated_energy_kwh:.1f} kWh")
 print(f"  Charge efficiency: {fleet.eta_charge:.4f}")
 print(f"  Discharge eff.:    {fleet.eta_discharge:.4f}")
-print(f"  Standby loss:      {fleet.standby_loss_kw:.3f} kW  (continuous, all 20 units)")
+print(f"  Standby loss:      {fleet.standby_loss_kw:.3f} kW")
 
-# --- Run LP
-result = run_lp_arbitrage(fleet, prices, dt_h=1.0, e0_kwh=None, enforce_return=True)
+result = run_lp_arbitrage(fleet, prices, dt_h=1.0, enforce_return=True)
 
 print(f"\nLP optimisation result:")
 print(f"  Net revenue:       €{result.net_revenue_eur:.2f}")
+print(f"  Round-trip eff.:   {result.rt_efficiency_pct:.2f} %")
 print(f"  Gross discharge:   {result.total_discharged_kwh:.1f} kWh")
-print(f"  Gross charge:      {result.total_charged_kwh:.1f} kWh")
-print(f"  Round-trip cycles: {result.equivalent_full_cycles:.2f}")
+print(f"  Equivalent cycles: {result.equivalent_full_cycles:.2f}")
 ```
 
 **Expected output:**
 ```
 LP fleet parameters:
-  Rated power:       5000 kW
-  Rated energy:      333.4 kWh
+  Rated power:       14600 kW
+  Rated energy:      58450.0 kWh
   Charge efficiency: 0.9302
   Discharge eff.:    0.9302
-  Standby loss:      2.840 kW  (continuous, all 20 units)
+  Standby loss:      7.100 kW
 
 LP optimisation result:
-  Net revenue:       €47.23
-  Gross discharge:   290.6 kWh
-  Gross charge:      298.4 kWh
-  Round-trip cycles: 0.87
+  Net revenue:       €2507.08
+  Round-trip eff.:   89.54 %
+  Gross discharge:   27840.0 kWh
+  Equivalent cycles: 0.48
 ```
 
-The optimiser charges during the overnight trough (hours 2–6, ~20 €/MWh) and discharges into the morning peak (hours 7–9) and evening peak (hours 16–19, up to 95 €/MWh), yielding a spread of ~75 €/MWh net of round-trip losses.
-
-**Dispatch plot:**
-
-![LP dispatch result](lp_dispatch_result.png)
+The optimiser charges during the overnight trough (hours 0–6, ~30–35 €/MWh) and discharges into the morning and evening peaks (up to 100 €/MWh), yielding a spread of ~65 €/MWh net of round-trip losses.
 
 ---
 
@@ -271,67 +282,127 @@ The LP uses a single (scalar) efficiency constant. In reality, efficiency varies
 import numpy as np
 from piecewise_linearization import piecewise_linearize_fleet
 from fess_unit import FESSParams
-from lp_piecewise_example import run_milp_arbitrage   # see lp_piecewise_example.py
+from lp_day_ahead_example import run_lp_arbitrage
+from lp_piecewise_example import run_milp_arbitrage
 
-unit_params = FESSParams(rated_power_kw=250.0, rated_energy_kwh=16.67)
+unit_params = FESSParams(rated_power_kw=292.0, rated_energy_kwh=1169.0)
 
-# Build 5×8 efficiency grid (5 power bands, 8 SoC segments)
-fleet_pw = piecewise_linearize_fleet(unit_params, n_units=20, K_p=5, K_e=8)
-
-# Same stylised DK2 price profile
 prices = np.array([
-    28, 25, 22, 20, 19, 21, 35, 62, 78, 71, 65, 58,
-    52, 49, 55, 67, 82, 95, 88, 74, 60, 48, 38, 30
+    35, 33, 31, 30, 30, 32, 42, 65, 82, 78, 72, 65,
+    60, 57, 62, 72, 88, 100, 95, 80, 68, 55, 45, 38
 ], dtype=float)
 
-# --- Run MILP (HiGHS via scipy >= 1.9)
-result_lp   = run_lp_arbitrage(fleet_lp, prices)    # from Example 3
+# Build 3×4 efficiency grid (3 power bands, 4 SoC segments)
+fleet_lp = linearize_fleet(unit_params, n_units=50)
+fleet_pw = piecewise_linearize_fleet(unit_params, n_units=50, K_p=3, K_e=4)
+
+result_lp   = run_lp_arbitrage(fleet_lp, prices, dt_h=1.0)
 result_milp = run_milp_arbitrage(fleet_pw, prices, dt_h=1.0)
 
 print("Comparison — LP vs MILP:")
 print(f"  {'':30s} {'LP':>10s}  {'MILP':>10s}")
 print(f"  {'Net revenue (€)':30s} {result_lp.net_revenue_eur:>10.2f}  {result_milp.net_revenue_eur:>10.2f}")
-print(f"  {'Gross discharge (kWh)':30s} {result_lp.total_discharged_kwh:>10.1f}  {result_milp.total_discharged_kwh:>10.1f}")
-print(f"  {'Equivalent full cycles':30s} {result_lp.equivalent_full_cycles:>10.2f}  {result_milp.equivalent_full_cycles:>10.2f}")
-print(f"  {'Solve time (s)':30s} {result_lp.solve_time_s:>10.2f}  {result_milp.solve_time_s:>10.2f}")
+print(f"  {'Revenue uplift (€)':30s} {'—':>10s}  {result_milp.net_revenue_eur - result_lp.net_revenue_eur:>+10.2f}")
+print(f"  {'Round-trip eff. (%)':30s} {result_lp.rt_efficiency_pct:>10.2f}  {result_milp.rt_efficiency_pct:>10.2f}")
+print(f"  {'Solve time (s)':30s} {result_lp.solve_time_s:>10.3f}  {result_milp.solve_time_s:>10.3f}")
 ```
 
 **Expected output:**
 ```
 Comparison — LP vs MILP:
                                         LP        MILP
-  Net revenue (€)                    47.23       49.81
-  Gross discharge (kWh)             290.6       287.3
-  Equivalent full cycles              0.87        0.86
-  Solve time (s)                      0.04        3.17
+  Net revenue (€)                  2507.08     2995.30
+  Revenue uplift (€)                    —      +488.22
+  Round-trip eff. (%)                89.54       91.20
+  Solve time (s)                      0.04        4.80
 ```
 
-The MILP captures ~5.5 % more revenue by routing dispatch to the efficiency peaks of each cell, at the cost of ~80× longer solve time due to the integer variables. For a 5 MW / 333 kWh fleet with 24 hourly intervals, the MILP has ~1 500 variables (400 binary), which HiGHS solves in seconds.
-
-**Efficiency grid and LP vs MILP dispatch comparison:**
-
-![Piecewise linearization grid](fess_piecewise_linearization.png)
-![LP vs MILP comparison](lp_vs_milp_comparison.png)
+The MILP captures **+€488 (+19.5%) more revenue** by routing dispatch to the efficiency peaks of each (power, SoC) cell, at the cost of ~120× longer solve time due to binary cell-activation variables. For a 50-unit fleet with 24 hourly intervals and a 3×4 grid, the MILP has ~2 900 variables (576 binary), which HiGHS solves in under 5 seconds.
 
 ---
 
-### Physics Verification
+## Simulation Results
 
-The linearisation fidelity can be inspected against the full nonlinear model:
+### S1 — Single Unit & Fleet Scenarios
 
-![Linearisation vs nonlinear](fess_linearization.png)
+Three scenarios from `example_usage.py`: a single-unit charge/discharge cycle, a 20-unit fleet following an aFRR AGC signal, and a threshold-based arbitrage strategy.
+
+![FESS Unit & Plant Simulation](fess_simulation_results.png)
+
+**Top row — Single unit (S1):**
+- Left: SoC (blue line) climbs during charging, holds, then depletes during discharge. Power commands (bars) show rated charge then rated discharge.
+- Right: Speed ratio follows SoC trajectory (quadratic relationship). Standby loss (orange dashed) rises with speed — the unit loses more energy sitting at high SoC than at low SoC.
+
+**Middle row — aFRR fleet (S2):**
+- Left: The 20-unit plant tracks a noisy AGC setpoint closely across a 60-minute regulation window.
+- Right: Fleet average SoC drifts downward as the asymmetric signal slowly depletes the fleet. The min–max band shows individual units spread by ±15 pp under SOC-balanced dispatch.
+
+**Bottom row — Arbitrage (S3):**
+- Left: The plant charges hard during low-price hours and discharges at peak. Price threshold (red/green lines) governs the binary charge/discharge decision.
+- Right: Fleet SoC swings from near-empty to near-full and back across the day — a full utilisation cycle.
 
 ---
 
-## Results Gallery
+### S2 — LP Linearisation Fidelity
 
-| Figure | Description |
-|---|---|
-| `fess_simulation_results.png` | Single-unit telemetry: SoC, speed, power, and loss breakdown over a 24-hour test cycle |
-| `fess_linearization.png` | Nonlinear efficiency curves vs. LP constant approximation across full SoC range |
-| `fess_piecewise_linearization.png` | 2-D efficiency surface (Power × SoC) with MILP cell boundaries overlaid |
-| `lp_dispatch_result.png` | Optimal LP charge/discharge schedule aligned to day-ahead price profile |
-| `lp_vs_milp_comparison.png` | Side-by-side dispatch schedule: LP scalar vs. MILP piecewise |
+Physics verification for a 292 kW / 1169 kWh unit showing how the nonlinear model is collapsed into LP-ready constants.
+
+![FESS Linearization](fess_linearization.png)
+
+**Top-left:** Round-trip efficiency vs shaft power for multiple speed ratios (SoC levels). The speed-averaged curve peaks at ~94.1 kW (LP optimal set-point), yielding η = 87.13%. Each coloured curve is a fixed speed; the black dashed line is the speed-averaged aggregate used by the LP.
+
+**Top-right:** RT efficiency vs speed ratio at the optimal shaft power. The LP uses a single scalar constant (η = 87.13% at energy midpoint sr = 0.721). The linearisation error band shows the LP slightly underestimates efficiency at high SoC and overestimates at low SoC — a conservative bias that keeps the LP feasible.
+
+**Bottom-left:** Standby loss decomposition vs speed ratio. Aerodynamic drag dominates at high speed; AMB bearing losses are secondary. The LP uses a single average standby constant (red dashed line) across the operational window — a deliberate simplification that slightly overstates losses at low SoC.
+
+**Bottom-right:** Available discharge power vs SoC. The true physics (blue) follows √SoC (nonlinear). The LP replaces this with a least-squares linear regression (red dashed), which is tight across the usable SoC window (47–1169 kWh).
+
+---
+
+### S3 — Day-Ahead LP Dispatch
+
+Optimal 24-hour charge/discharge schedule for a 50-unit FESS fleet on Nord Pool-style day-ahead prices.
+
+![LP Day-Ahead Dispatch](lp_dispatch_result.png)
+
+**Net revenue: €2 507.08 | RT efficiency: 89.54%**
+
+- **Price panel:** DK2-style profile with overnight trough (~30–35 €/MWh) and dual peaks — morning (~82 €/MWh) and evening (~100 €/MWh).
+- **Charge/discharge schedule:** The LP charges in 5 discrete blocks during hours 0–7 (low price) and discharges into both price peaks (hours 8–12, 16–22). Partial discharge is used to pace energy against the SoC return constraint.
+- **Fleet SoC:** Starts at ~25 MWh, rises to the 58 MWh cap during overnight charging, then depletes to near-minimum across both discharge windows. The SoC return constraint brings it back to the starting level by hour 24.
+- **Net grid power:** Import (teal) during charging, export (orange) during discharge. The transformer limit (18.9 MW) is never breached, but the LP operates close to it during peak discharge hours.
+
+---
+
+### S4 — MILP Piecewise Linearisation
+
+2-D efficiency surface (Power × SoC) used by the MILP, with cell boundaries and per-cell η constants overlaid.
+
+![FESS Piecewise Linearization](fess_piecewise_linearization.png)
+
+**Top row — Efficiency surfaces:**
+- Left (charge, Grid→Shaft): η_c ranges from ~63% (low SoC, high power) to ~97.5% (high SoC, low power). The MILP forces the dispatch into the highest-η cell available at each timestep.
+- Right (discharge, Shaft→Grid): η_d surface is symmetric. Low-SoC, high-power cells have the lowest efficiency — the MILP avoids these when the price spread doesn't justify the loss.
+
+**Bottom-left:** Standby losses vs SoC with 4-segment PWL approximation. Each step approximates the smooth physics curve within its SoC band. The PWL total error is < 2% across the full range.
+
+**Bottom-right:** Available discharge power vs SoC — 4-segment PWL steps (green) vs LP linear regression (red dashed) vs true physics (blue). The PWL steps capture the nonlinearity more faithfully at both low and high SoC extremes.
+
+---
+
+### S5 — LP vs MILP Dispatch Comparison
+
+Side-by-side comparison of LP and MILP optimal schedules on the same price profile and fleet.
+
+![LP vs MILP Comparison](lp_vs_milp_comparison.png)
+
+**Revenue: LP €2 507.08 | MILP €2 995.30 | Δ = +€488.22 (+19.5%)**
+
+- **Charge power:** MILP charges at lower power levels than LP, preferring high-efficiency operating points even if this spreads charging over more hours.
+- **Discharge power:** MILP discharges more aggressively into peak-price hours, recovering the stored energy more efficiently.
+- **SoC trajectory:** MILP maintains a slightly higher average SoC, keeping the fleet in the high-efficiency region of the discharge surface.
+- **Net grid power:** Both solutions respect the transformer limit. MILP trades more frequently in smaller blocks.
+- **Round-trip efficiency per interval (bottom panel):** LP uses a single constant η (blue dots, flat at 89.5%). MILP selects the per-cell η for each interval (orange dots) — ranging from 82% to 96% depending on dispatch conditions. Higher average per-interval efficiency is the source of the revenue uplift.
 
 ---
 
@@ -373,10 +444,10 @@ For MILP, step 1 is repeated per cell (j, k) in the Power × SoC grid. The bilin
 MIT — see `LICENSE` for details. If you use this work in academic research, please cite the DTU GitLab repository:
 
 ```
-@misc{flywheel_model,
+@misc{fess_modelling_and_monetization,
   author  = {Stefan},
-  title   = {Flywheel Energy Storage System — Physics Modelling and Market Optimisation},
+  title   = {FESS Modelling and Monetization — Flywheel Battery Physics and Energy Trading},
   year    = {2024},
-  url     = {https://gitlab.gbar.dtu.dk/project/flywheel_model}
+  url     = {https://github.com/stephen211111/fess-modelling-and-monetization}
 }
 ```
